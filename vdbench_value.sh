@@ -25,6 +25,25 @@ storageInfo[json]="storageInfo.json"
 
 printf "test time stemp %s\n" ${log[timestamp]}
 
+wrap_color() {
+	text="$1"
+	shift
+	color "$@"
+	echo -n "$text"
+	color reset
+	echo
+}
+
+wrap_good() {
+	echo "$(wrap_color "$1" white): $(wrap_color "$2" green)"
+}
+wrap_bad() {
+	echo "$(wrap_color "$1" bold): $(wrap_color "$2" bold red)"
+}
+wrap_warning() {
+	wrap_color >&2 "$*" red
+}
+
 parse_parameter() {
 
 if [[ $# < 1 ]]; then
@@ -114,6 +133,9 @@ do
         --cleanenv )
             vdbench_params[cleanenv]="true"
             ;;
+        -vd | --vdbin )
+            vdbench[vdbin]="$1"
+            ;;
         --help )
             usage
             ;;
@@ -145,6 +167,7 @@ echo -e "\
    -rd | --raidtype    raid type for volume creation : <default raid10>
 
  Vdbench Arguments :
+   -vd | --vdbin       vdbench bin execution path
    -wd | --writedata   write data from storage : <default 3000g>
    -rd | --readdata    read data from storage : <default 1000g>
    -th | --threads     threads per lun : <default 4>
@@ -171,6 +194,10 @@ $(basename $0) -s rtc02t --volnum 128 --volsize 488  -c \"wl9 wl10 wl11\" -type 
 
 checking_params()
 {
+if [[ ! {vdbench_params[vdbin]}  ]]; then
+    print "using default path to vdbench test"
+    vdbench[vdbin]="/root/vdbench"
+fi
 
 if [[ ! ${storageInfo[stand_name]} ]];then
 	printf "ERRROR : STORAGE NOT DEFINED!!!!!! \n "
@@ -249,16 +276,13 @@ function logger(){
 	type=$1
     ouput=$2
 	if [[ $type == "debug" ]]; then
-		#printf "[%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "$@"
 		if [[ ${log[debug]} == "true" ]] ; then printf "[%s] [%s  ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "DEBUG" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[debug]}; fi
 	elif [[ $type == "info" ]] ; then
-		#printf "[%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "$@"
 		printf "[%s] [%s   ] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "INFO" "$ouput" | tee -a ${log[info]}
 	elif [[ $type == "error" ]] ; then
-		#printf "[%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "$@"
 		printf "[%s] [%s     ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "ERROR" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]}
 	elif [[ $type == "fetal" ]] ; then
-		printf "[%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "FETAL" "$output" | tee -a ${log[error]}
+		printf "[%s] [%s     ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "FETAL" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]} ; exit
 	elif [[ $type == "ver" ]] ; then
 		if [[ ${log[verbose]} == "true" ]] ; then printf "[%s] [%s] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "VERBOSE" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[verbose]} ;fi
 	elif [[ ! $type =~ "debug|ver|error|info" ]] ; then
@@ -283,7 +307,8 @@ function storageRemoveHosts() {
 }
 function hostRescan(){
 	storageInfo[vdiskPerClient]=${storageInfo[volnum]} 
-	for c in "${vdbench_params[clients]}"; do
+	for c in ${vdbench_params[clients]}
+	do
         logger "info" "$c host rescanning "
         ssh $c /usr/global/scripts/rescan_all.sh &> ${log[globalLog]}
         logger "info" "vdisk per client ${storageInfo[vdiskPerClient]} , vdisks found : [ " $( ssh $c multipath -ll|grep -c mpath )" ]"
@@ -298,7 +323,7 @@ function hostRescan(){
 function removeMdiskGroup(){
 	mdiskid=`ssh -p 26 ${storageInfo[stand_name]} ""lsmdiskgrp |grep -v id | sed -r 's/^[^0-9]*([0-9]+).*$/\1/'""`
 	if [[ $mdiskid == "" ]]; then
-        logger "info" "mdiskgrp id : none"
+        logger "info" "No mDiskGroup to Remove"
 	else
         logger "info" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
 		ssh -p 26 ${storageInfo[stand_name]} svctask rmmdiskgrp -force $mdiskid
@@ -314,7 +339,6 @@ totalFC=0
 for c in ${vdbench_params[clients]}
 do
 	storageInfo[hostCount]=$(( storageInfo[hostCount] + 1 ))
-	logger "info" "total host ${storageInfo[clientsCount]}"
     wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
     wwpnHostCount=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep -c Up `
     totalFC=$((  totalFC + $wwpnHostCount ))
@@ -324,6 +348,7 @@ do
         #ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null
     ssh ${storageInfo[stand_name]} -p 26 svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
 done
+	logger "info" "Total Host Created ${storageInfo[hostCount]}"
 storageInfo[vdiskPerClient]=$(( storageInfo[volnum] / storageInfo[hostCount]  ))
 if [[ ${log[verbose]} == "true" ]] ; then logger "debug" "Total vdisk per client ${storageInfo[vdiskPerClient]}"  ; fi
 }
@@ -445,12 +470,6 @@ storageInfo[mkMasterArray]="/home/mk_arrays_master fc ${storageInfo[raidType]} s
 storageInfo[mkVdisk]="/home/mk_vdisks fc 1 ${storageInfo[volnum]} "
 
 if [[ ${storageInfo[hardware]} =~ "T5H" ]]; then
-	#ssh -p 26 $1 /home/mk_arrays_master fc raid5 sas_hdd 238 8 32 128 400 COMPRESSED NOFMT AUTOEXP >/dev/null
-    #ssh -p 26 $1 /home/mk_arrays_master fc raid10 sas_hdd $number_of_drive $array_drive $number_of_mdisk_group $vol_num 500 COMPRESSED NOFMT NOSCRUB &> ${log[test_info]}
-    #array_drive=8
-    #number_of_drive=$(ssh -p 26 $1 lsdrive -nohdr | wc -l)
-    #number_of_mdisk_group=$(( $number_of_drive / $array_drive ))
-
 	storageInfo[arrayGroup]=8
     storageInfo[driveCount]=$(ssh -p 26 ${storageInfo[stand_name]} lsdrive -nohdr | wc -l)
     storageInfo[numberMdiskGroup]=$(( ${storageInfo[driveCount]} / ${storageInfo[arrayGroup]} ))
@@ -469,9 +488,13 @@ if [[ ${storageInfo[hardware]} =~ "T5H" ]]; then
         ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
     fi
 else
-    	echo "Running with BFN configuration"
-        #echo "ssh $1 -p 26 /home/mk_vdisks fc 1 $vol_num 409600 0 NOFMT COMPRESSED AUTOEXP >/dev/null"
-        ssh ${storageInfo[stand_name]} -p 26 /home/mk_vdisks fc 1 ${storageInfo[volnum]} 495600 0 NOFMT COMPRESSED AUTOEXP &> ${log[globalLog]}
+    logger "info" "Running with BFN configuration"
+	if [[ ! $(ssh ${storageInfo[stand_name]} "-e /home/mk_vdisks")  ]];
+	then
+		logger "fetal" "mk_vdisk does not exist on "
+	else
+       	ssh ${storageInfo[stand_name]} -p 26 /home/mk_vdisks fc 1 ${storageInfo[volnum]} 495600 0 NOFMT COMPRESSED AUTOEXP &> ${log[globalLog]}
+	fi 
 fi
 sleep 10
 
@@ -529,9 +552,9 @@ rd=run1,wd=wd1,iorate=max,elapsed=24h,maxdata=${vdbench[write_data]},warmup=360,
         logger "debug" "./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
 	elif [[ ${log[verbose]} == "true" ]]; then
         logger "ver" "./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
-        `./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}`
+        `${vdbench[vdbin]}/vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}`
     else
-        `./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP >> ${log[output_file]}`
+        `${vdbench[vdbin]}./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP >> ${log[output_file]}`
     fi
 }
 
@@ -565,9 +588,9 @@ rd=run1,wd=wd1,iorate=max,elapsed=24h,maxdata=${vdbench[read_data]},warmup=360,i
 
 	elif [[ ${log[verbose]} == "true" ]]; then
         logger "ver" "./vbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
-        `./vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}`
+        `${vdbench[vdbin]}/vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}`
     else
-        `./vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP >> ${log[output_file]}`
+        `${vdbench[vdbin]}/vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP >> ${log[output_file]}`
     fi
 }
 
