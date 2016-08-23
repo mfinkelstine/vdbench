@@ -282,7 +282,7 @@ function logger(){
 	elif [[ $type == "error" ]] ; then
 		printf "[%s] [%s     ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "ERROR" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]}
 	elif [[ $type == "fetal" ]] ; then
-		printf "[%s] [%s     ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "FETAL" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]} ; exit
+		printf "[%s] [%s  ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "FETAL" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]} ; exit
 	elif [[ $type == "ver" ]] ; then
 		if [[ ${log[verbose]} == "true" ]] ; then printf "[%s] [%s] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "VERBOSE" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[verbose]} ;fi
 	elif [[ ! $type =~ "debug|ver|error|info" ]] ; then
@@ -491,14 +491,40 @@ else
     logger "info" "Running with BFN configuration"
 	if [[ ! $(ssh ${storageInfo[stand_name]} "-e /home/mk_vdisks")  ]];
 	then
-		logger "fetal" "mk_vdisk does not exist on "
+		logger "error" "mk_vdisk does not exist on ${storageInfo[stand_name]}"
+        storageCopyMK 
+        
+    
+
 	else
        	ssh ${storageInfo[stand_name]} -p 26 /home/mk_vdisks fc 1 ${storageInfo[volnum]} 495600 0 NOFMT COMPRESSED AUTOEXP &> ${log[globalLog]}
 	fi 
 fi
 sleep 10
-
-
+}
+function storageCopyMK(){
+#        if ($1 == "hardware") {
+#                if ($2 ~ /^[48C][AFG][248]$/)   type="SVC"      ### Matches 4F2 8F2 8F4 8G4 8A4 CF8 CG8
+#                if ($2 == "DH8")                type="BFN"
+#                if ($2 ~ /[13]00/ )             type="V7000"
+#                if ($2 ~ /[45]00/ )             type="FAB1"     ### 400 is 6-core FAB
+#                if ($2 ~ /T5H/ )                type="TB5"
+#                if ($2 ~ /SV1/ )                type="CAYMAN"
+#                if ($2 ~ /600/ )                type="FAB2"
+#                if ($2 ~ /S01/ )                type="Lenovo"
+    storageInfo[mkVdisks]="/usr/global/scripts/SVC/mk_vdisks"
+    storageInfo[mkArray]="/usr/global/scripts/SVC/mk_arrays_master"
+    if   [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]]; then
+        scp -P 26 ${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:/home/
+        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[mkVdisks]}"
+    elif [[ ${storageInfo[hardware]} =~ // ]];then
+        scp -P 26 ${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:/home/
+        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[mkVdisks]}"
+    else
+        scp -P 26 ${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:/home/
+        ssh ${storageInfo[stand_name]} "chmod a+x  ${storageInfo[mkVdisks]}"
+    fi
+    
 }
 
 function vdbenchDeviceList() {
