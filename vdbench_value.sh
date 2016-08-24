@@ -63,6 +63,22 @@ do
     
     case "${key}" in
 
+        --hsrm  )
+            vdbench_params[hsrm]="$1"
+            shift
+            ;;
+        --hrdev)
+            vdbench_params[hrdev]="$1"
+            shift
+            ;;
+        --cshost)
+            vdbench_params[cshost]="$1"
+            shift
+            ;;
+        --csdev)
+            vdbench_params[csdev]="$1"
+            shift
+            ;;
         -vs | --volsize )
             #volsize="$1"
             storageInfo[volsize]="$1"
@@ -187,6 +203,13 @@ echo -e "\
   --xlsx              create excel file : <default disable>
   --upload            upload json file to par if no errors found
 
+ extra parameters :
+  --hsrm              host storage remove   : <default : yes>
+  --hrdev             rescan host device    : <default : yes>
+  --cshost            create storage host   : <default : yes>
+  --csdev             create storage host   : <default : yes>
+
+
  debug info :
   -b | --debug        default false
   -v | --verbose      default false 
@@ -200,7 +223,7 @@ $(basename $0) -s rtc02t --volnum 128 --volsize 488  -c \"wl9 wl10 wl11\" -type 
 checking_params()
 {
 if [[ ! {vdbench_params[vdbin]}  ]]; then
-    print "using default path to vdbench test"
+    printf "using default path to vdbench test"
     vdbench[vdbin]="/root/vdbench"
 fi
 
@@ -214,6 +237,23 @@ if [[ ! ${vdbench_params[clients]}  ]];then
 	usage
 	exit
 fi
+
+if [[ ! {vdbench_params[hsrm]}  ]]; then
+    vdbench[hsrm]="true"
+fi
+
+if [[ ! {vdbench_params[hrdev]}  ]]; then
+    vdbench[hrdev]="true"
+fi
+
+if [[ ! {vdbench_params[cshost]}  ]]; then
+    vdbench[cshost]="true"
+fi
+
+if [[ ! {vdbench_params[csdev]}  ]]; then
+    vdbench[csdev]="true"
+fi
+
 if [[ ! ${storageInfo[volsizeunit]} ]];then
 	storageInfo[volsizeunit]="g"
 fi
@@ -317,7 +357,9 @@ function hostRescan(){
 	do
         logger "info" "$c host rescanning "
         ssh $c /usr/global/scripts/rescan_all.sh &> ${log[globalLog]}
-        logger "info" "vdisk per client ${storageInfo[vdiskPerClient]} , vdisks found : [ " $( ssh $c multipath -ll|grep -c mpath )" ]"
+        hostmPathCount=$( ssh $c "multipath -ll|grep -c mpath" )
+        logger "info" "vdisk per client ${storageInfo[vdiskPerClient]} , vdisks found : [ \" $hostmPathCount \" ]"
+
 		hostDeviceCount=$( ssh $c multipath -ll|grep -c mpath )
 		if [[ ! ${storageInfo[vdiskPerClient]} == $hostDeviceCount ]] ; then 
 			logger "fetal" "!!!!! ERROR | unbalanced devices on host $c | device count [ $hostDeviceCount ] | ERROR !!!!!" 
@@ -343,7 +385,6 @@ function removeMdiskGroup(){
     else
         logger "info" "No mdiskgrp exist on ${storageInfo[stand_name]}" 
     fi
-    exit
 }
 
 function createHosts() {
@@ -524,13 +565,12 @@ elif [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]] ; then
 	fi 
 else
     logger "info" "Unknown Hardware Type [ ${storageInfo[hardware]} ]"
+    exit
 fi
 
 sleep 10
 }
-
 function storageCopyMK(){
-
 #        if ($1 == "hardware") {
 #                if ($2 ~ /^[48C][AFG][248]$/)   type="SVC"      ### Matches 4F2 8F2 8F4 8G4 8A4 CF8 CG8
 #                if ($2 == "DH8")                type="BFN"
@@ -540,7 +580,6 @@ function storageCopyMK(){
 #                if ($2 ~ /SV1/ )                type="CAYMAN"
 #                if ($2 ~ /600/ )                type="FAB2"
 #                if ($2 ~ /S01/ )                type="Lenovo"
-
     if   [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]]; then
         logger "info" "1 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
         scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
@@ -565,14 +604,14 @@ count=1
 	for dev in `ssh $client multipath -l|grep "2145" | awk '{print \$1}'`; do
     	device="/dev/mapper/$dev"
     	if [[ ${log[debug]} == "true" ]]; then
-            logger "debug" "vdbench sd output: sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]},threads=${vdbench[threads]}"
+            logger "debug" "vdbench sd output: sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]}g,threads=${vdbench[threads]}"
             count=$(( count+1  ))
     	elif [[ ${log[verbose]} == "true" ]]; then
-            logger "ver" "vdbench sd output: sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]},threads=${vdbench[threads]}"
-            echo  "sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]},threads=${vdbench[threads]}" >> ${vdbench[disk_list]}
+            logger "ver" "vdbench sd output: sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]}g,threads=${vdbench[threads]}"
+            echo  "sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]}g,threads=${vdbench[threads]}" >> ${vdbench[disk_list]}
             count=$(( count+1  ))
         else
-            echo  "sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]},threads=${vdbench[threads]}" >> ${vdbench[disk_list]}
+            echo  "sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]}g,threads=${vdbench[threads]}" >> ${vdbench[disk_list]}
             count=$(( count+1  ))
         fi
     done
@@ -666,15 +705,17 @@ checking_params
 if [[ ${log[debug]} == "true" ]]  ; then print_params ; fi
 getStorageInfo
 vdbenchMainDirectoryCreation
-storageRemoveHosts
-createHosts
+if [[ ${vdbench[cshost]} == "true" ]] ; then 
+    storageRemoveHosts
+    createHosts
+fi
 
 for bs in ${vdbench[blocksize]}; do
 	log[testCount]=1
-	createStorageVolumes	
+	if [[ ${vdbench[csdev]} == "true" ]] ; then createStorageVolumes ; fi
 	getStorageVolumes
 	vdbenchDirectoryResutls
-	hostRescan
+	if [[ ${vdbench[hrdev]} == "true" ]] ; then hostRescan ; fi
 	for CP in ${vdbench[cmprun]} ; do
 		logger "info" "===[ ${log[testCount]} ]===[ blocksize | $bs ]====[ RATIO | $CP ]=============================================="
 		vdbenchResultsFiles
@@ -683,6 +724,10 @@ for bs in ${vdbench[blocksize]}; do
 		vdbenchReadTest
 		log[testCount]=$(( log[testCount] + 1 ))
 	done
+    vdbench[hsrm]="true"
+    vdbench[hrdev]="true"
+    vdbench[cshost]="true"
+    vdbench[csdev]="true"
 done
 # log output example
 # [21/10/16 19:10:22] [INFO] 
