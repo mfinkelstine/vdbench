@@ -259,7 +259,7 @@ if [[ ! ${storageInfo[voltype]} ]];then
 	storageInfo[voltype]="COMPRESSED"
 fi
 if [[ ! ${storageInfo[raidType]} ]] ; then
-	storageInfo[raidType]="raid10"
+	storageInfo[raidType]="raid5"
 fi
 
 if [[ ! $vdbench_params[cleanenv]} ]]; then
@@ -288,7 +288,7 @@ function logger(){
 		printf "[%s] [%s     ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "ERROR" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]}
 	elif [[ $type == "fetal" ]] ; then
 		printf "[%s] [%s  ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "FETAL" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]} ; exit
-	elif [[ $type == "ver" ]] ; then
+	elif [[ $type == "ver" || $type == "verbose" ]] ; then
 		if [[ ${log[verbose]} == "true" ]] ; then printf "[%s] [%s] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "VERBOSE" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[verbose]} ;fi
 	elif [[ ! $type =~ "debug|ver|error|info" ]] ; then
 		printf "[%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "$type" 
@@ -311,7 +311,8 @@ function storageRemoveHosts() {
 	sleep 2
 }
 function hostRescan(){
-	storageInfo[vdiskPerClient]=${storageInfo[volnum]} 
+#storageInfo[vdiskPerClient]=$(( storageInfo[volnum] / storageInfo ))
+
 	for c in ${vdbench_params[clients]}
 	do
         logger "info" "$c host rescanning "
@@ -327,12 +328,22 @@ function hostRescan(){
 
 function removeMdiskGroup(){
 	mdiskid=`ssh -p 26 ${storageInfo[stand_name]} ""lsmdiskgrp |grep -v id | sed -r 's/^[^0-9]*([0-9]+).*$/\1/'""`
-	if [[ $mdiskid == "" ]]; then
-        logger "info" "No mDiskGroup to Remove"
-	else
-        logger "info" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
-		ssh -p 26 ${storageInfo[stand_name]} svctask rmmdiskgrp -force $mdiskid
-	fi
+	countMdiskids=`ssh -p 26 ${storageInfo[stand_name]} "lsmdiskgrp -nohdr | wc -l "`
+#    logger "info" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
+    if [[ $countMdiskids -ge "1" ]]; then
+        if   [[ ${log[debug]} == "true" ]]; then
+            logger "debug" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
+        elif [[ ${log[verbose]} == "true" ]]; then
+            logger "info" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
+		    ssh -p 26 ${storageInfo[stand_name]} svctask rmmdiskgrp -force $mdiskid
+        else 
+            logger "info" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
+	        ssh -p 26 ${storageInfo[stand_name]} svctask rmmdiskgrp -force $mdiskid
+        fi
+    else
+        logger "info" "No mdiskgrp exist on ${storageInfo[stand_name]}" 
+    fi
+    exit
 }
 
 function createHosts() {
@@ -346,7 +357,7 @@ do
 	storageInfo[hostCount]=$(( storageInfo[hostCount] + 1 ))
     wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
     wwpnHostCount=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep -c Up `
-    totalFC=$((  totalFC + $wwpnHostCount ))
+    totalFC=$(( totalFC + $wwpnHostCount ))
     logger "info" "Creating host $c " 
     logger "ver" "  Host wwpn $wwpn" 
     logger "debug" "  COMMAND \"ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn $wwpn -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null\""
@@ -354,8 +365,8 @@ do
     ssh ${storageInfo[stand_name]} -p 26 svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
 done
 	logger "info" "Total Host Created ${storageInfo[hostCount]}"
-storageInfo[vdiskPerClient]=$(( storageInfo[volnum] / storageInfo[hostCount]  ))
-if [[ ${log[verbose]} == "true" ]] ; then logger "debug" "Total vdisk per client ${storageInfo[vdiskPerClient]}"  ; fi
+    storageInfo[vdiskPerClient]=$(( storageInfo[volnum] / storageInfo[hostCount]  ))
+    logger "verbose" "Total vdisk per client ${storageInfo[vdiskPerClient]}" 
 }
 
 function clearStorageLogs() {
@@ -471,7 +482,7 @@ function createStorageVolumes(){
 #ssh $1 -p 26 ls /home/mk_arrays_master >/dev/null
 removeMdiskGroup
 
-storageInfo[mkMasterArray]="${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]} mkVdisk fc ${storageInfo[raidType]} sas_hdd "
+storageInfo[mkMasterArray]="${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]} fc ${storageInfo[raidType]} sas_hdd "
 storageInfo[mkVdisk]="${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} fc 1 ${storageInfo[volnum]} "
 logger "info" "Running with storage hardware  ${storageInfo[hardware]}"
 
@@ -518,7 +529,9 @@ fi
 
 sleep 10
 }
+
 function storageCopyMK(){
+
 #        if ($1 == "hardware") {
 #                if ($2 ~ /^[48C][AFG][248]$/)   type="SVC"      ### Matches 4F2 8F2 8F4 8G4 8A4 CF8 CG8
 #                if ($2 == "DH8")                type="BFN"
@@ -528,6 +541,7 @@ function storageCopyMK(){
 #                if ($2 ~ /SV1/ )                type="CAYMAN"
 #                if ($2 ~ /600/ )                type="FAB2"
 #                if ($2 ~ /S01/ )                type="Lenovo"
+
     if   [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]]; then
         logger "info" "1 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
         scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
