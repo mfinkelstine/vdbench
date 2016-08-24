@@ -524,7 +524,6 @@ elif [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]] ; then
 	fi 
 else
     logger "info" "Unknown Hardware Type [ ${storageInfo[hardware]} ]"
-    exit
 fi
 
 sleep 10
