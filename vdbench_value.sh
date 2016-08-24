@@ -8,7 +8,7 @@ declare -A vdbenchResultsLog
 declare -A vdbench
 declare -A storageInfo
 
-
+#### global variables
 directoryStracture[absPath]="benchmark_results"
 directoryStracture[bas]="benchmark_results"
 log[timestamp]=$(date +%y%m%d_%H%M%S)
@@ -22,6 +22,11 @@ vdbenchResultsLog[writetest]="write_test_"
 vdbenchResultsLog[readtest]="read_test_"
 vdbenchResultsLog[out]="out_"
 storageInfo[json]="storageInfo.json"
+
+storageInfo[remoteScriptsPath]="/home"
+storageInfo[localScriptPath]="/usr/global/scripts/SVC"
+storageInfo[mkVdisks]="mk_vdisks"
+storageInfo[mkArray]="mk_arrays_master"
 
 printf "test time stemp %s\n" ${log[timestamp]}
 
@@ -466,40 +471,51 @@ function createStorageVolumes(){
 #ssh $1 -p 26 ls /home/mk_arrays_master >/dev/null
 removeMdiskGroup
 
-storageInfo[mkMasterArray]="/home/mk_arrays_master fc ${storageInfo[raidType]} sas_hdd "
-storageInfo[mkVdisk]="/home/mk_vdisks fc 1 ${storageInfo[volnum]} "
+storageInfo[mkMasterArray]="${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]} mkVdisk fc ${storageInfo[raidType]} sas_hdd "
+storageInfo[mkVdisk]="${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} fc 1 ${storageInfo[volnum]} "
+logger "info" "Running with storage hardware  ${storageInfo[hardware]}"
 
-if [[ ${storageInfo[hardware]} =~ "T5H" ]]; then
+if [[ ${storageInfo[hardware]} == @(T5H|4500|1300|600) ]]; then
 	storageInfo[arrayGroup]=8
     storageInfo[driveCount]=$(ssh -p 26 ${storageInfo[stand_name]} lsdrive -nohdr | wc -l)
     storageInfo[numberMdiskGroup]=$(( ${storageInfo[driveCount]} / ${storageInfo[arrayGroup]} ))
 	storageInfo[mkMasterArray]+="${storageInfo[driveCount]} ${storageInfo[arrayGroup]} ${storageInfo[numberMdiskGroup]} "
 	storageInfo[mkMasterArray]+="${storageInfo[volnum]} ${storageInfo[volsize]} ${storageInfo[voltype]} NOFMT NOSCRUB"
 
-    if [[ ${log[debug]} =~ "true" ]]; then
-    	logger "debug" "Running with FAB configuration with ouput"
-        logger "debug" "ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
-    elif [[ ${log[verbose]} == "true" ]]; then
-        logger "ver" "Running with FAB configuration with ouput"
-		logger "ver" "command| ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
-        ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
-    else
-        logger "info" "Creating volumes on ${storageInfo[stand_name]}"
-        ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
-    fi
-else
-    logger "info" "Running with BFN configuration"
-	if [[ ! $(ssh ${storageInfo[stand_name]} "-e /home/mk_vdisks")  ]];
-	then
-		logger "error" "mk_vdisk does not exist on ${storageInfo[stand_name]}"
-        storageCopyMK 
-        
-    
+	if [[ $(ssh ${storageInfo[stand_name]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} ]") -eq "0" ]];
+    then
 
+        if [[ ${log[debug]} =~ "true" ]]; then
+        	logger "debug" "Running with FAB configuration with ouput"
+            logger "debug" "ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
+        elif [[ ${log[verbose]} == "true" ]]; then
+            logger "ver" "Running with FAB configuration with ouput"
+    		logger "ver" "command| ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
+            ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
+        else
+            logger "info" "Creating volumes on ${storageInfo[stand_name]}"
+            ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
+        fi
+    else
+		logger "error" "${storageInfo[mkArray]} does not exist on ${storageInfo[stand_name]} path ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
+        storageCopyMK
+        continue 1
+    fi 
+elif [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]] ; then
+    logger "info" "Running with BFN configuration"
+	if [[ $(ssh ${storageInfo[stand_name]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} ]") -ne "0" ]];
+	then
+		logger "error" "${storageInfo[mkVdisks]} does not exist on ${storageInfo[stand_name]} path ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
+        storageCopyMK
+        continue 1
 	else
-       	ssh ${storageInfo[stand_name]} -p 26 /home/mk_vdisks fc 1 ${storageInfo[volnum]} 495600 0 NOFMT COMPRESSED AUTOEXP &> ${log[globalLog]}
+       	ssh ${storageInfo[stand_name]} -p 26 ${storageInfo[mkVdisk]} fc 1 ${storageInfo[volnum]} 495600 0 NOFMT COMPRESSED AUTOEXP &> ${log[globalLog]}
 	fi 
+else
+    logger "info" "Unknown Hardware Type [ ${storageInfo[hardware]} ]"
+    exit
 fi
+
 sleep 10
 }
 function storageCopyMK(){
@@ -512,17 +528,18 @@ function storageCopyMK(){
 #                if ($2 ~ /SV1/ )                type="CAYMAN"
 #                if ($2 ~ /600/ )                type="FAB2"
 #                if ($2 ~ /S01/ )                type="Lenovo"
-    storageInfo[mkVdisks]="/usr/global/scripts/SVC/mk_vdisks"
-    storageInfo[mkArray]="/usr/global/scripts/SVC/mk_arrays_master"
     if   [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]]; then
-        scp -P 26 ${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:/home/
-        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[mkVdisks]}"
+        logger "info" "1 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
+        scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
+        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
     elif [[ ${storageInfo[hardware]} =~ // ]];then
-        scp -P 26 ${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:/home/
-        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[mkVdisks]}"
+        logger "info" "2 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
+        scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
+        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
     else
-        scp -P 26 ${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:/home/
-        ssh ${storageInfo[stand_name]} "chmod a+x  ${storageInfo[mkVdisks]}"
+        logger "info" "3 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
+        scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
+        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
     fi
     
 }
