@@ -238,19 +238,19 @@ if [[ ! ${vdbench_params[clients]}  ]];then
 	exit
 fi
 
-if [[ ! {vdbench_params[hsrm]}  ]]; then
+if [[ ! ${vdbench_params[hsrm]}  ]]; then
     vdbench[hsrm]="true"
 fi
 
-if [[ ! {vdbench_params[hrdev]}  ]]; then
+if [[ ! ${vdbench_params[hrdev]}  ]]; then
     vdbench[hrdev]="true"
 fi
 
-if [[ ! {vdbench_params[cshost]}  ]]; then
+if [[ ! ${vdbench_params[cshost]}  ]]; then
     vdbench[cshost]="true"
 fi
 
-if [[ ! {vdbench_params[csdev]}  ]]; then
+if [[ ! ${vdbench_params[csdev]}  ]]; then
     vdbench[csdev]="true"
 fi
 
@@ -649,7 +649,7 @@ rd=run1,wd=wd1,iorate=max,elapsed=24h,maxdata=${vdbench[write_data]},warmup=360,
         logger "ver" "./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
         `${vdbench[vdbin]}/vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}`
     else
-        `${vdbench[vdbin]}./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP >> ${log[output_file]}`
+        `${vdbench[vdbin]}/vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP >> ${log[output_file]}`
     fi
 }
 
