@@ -712,12 +712,13 @@ fi
 
 for bs in ${vdbench[blocksize]}; do
 	log[testCount]=1
-	if [[ ${vdbench[csdev]} == "true" ]] ; then createStorageVolumes ; fi
-	getStorageVolumes
-	vdbenchDirectoryResutls
-	if [[ ${vdbench[hrdev]} == "true" ]] ; then hostRescan ; fi
 	for CP in ${vdbench[cmprun]} ; do
+	    if [[ ${vdbench[csdev]} == "true" ]] ; then createStorageVolumes ; fi
+	    
 		logger "info" "===[ ${log[testCount]} ]===[ blocksize | $bs ]====[ RATIO | $CP ]=============================================="
+        getStorageVolumes
+	    vdbenchDirectoryResutls
+	    if [[ ${vdbench[hrdev]} == "true" ]] ; then hostRescan ; fi
 		vdbenchResultsFiles
 		vdbenchDeviceList
 		vdbenchWriteTest
