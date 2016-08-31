@@ -7,6 +7,7 @@ declare -A directoryStracture
 declare -A vdbenchResultsLog
 declare -A vdbench
 declare -A storageInfo
+declare -A hostInfo
 
 #### global variables
 directoryStracture[absPath]="benchmark_results"
@@ -391,16 +392,26 @@ function createHosts() {
 clients=${vdbench_params[clients]}
 storageInfo[hostCount]=0
 logger "info" "Creating hosts ${clients[@]}"
+directoryStracture[mountScripts]="/usr/global/scripts/"
 
-totalFC=0
+#totalFC=0
 for c in ${vdbench_params[clients]}
 do
 	storageInfo[hostCount]=$(( storageInfo[hostCount] + 1 ))
-    wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
-    wwpnHostCount=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep -c Up `
-    totalFC=$(( totalFC + $wwpnHostCount ))
-    logger "info" "Creating host $c " 
-    logger "ver" "  Host wwpn $wwpn" 
+    if ssh $c "grep -qs "${directoryStracture[mountScripts]}" /proc/mounts "; then
+        logger "info" "[ ${directoryStracture[mountScripts]} ] is mounted"
+        logger "ver" "command \"awk '{print \$2 }' /proc/mounts \| grep -qs \"\^${directoryStracture[mountScripts]}\$\""
+        wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
+        wwpnHostCount=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep -c Up`
+    else
+        logger "ver" "command \"awk '{print \[ }' /proc/mounts \| grep -qs \"\^${directoryStracture[mountScripts]}\$\"]"
+        logger "info" "[ ${directoryStracture[mountScripts]} ] is not mounted"
+        #wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
+        wwpnHostCount=$(hostWWN $c)
+    fi
+    #totalFC=$(( totalFC + $wwpnHostCount ))
+    #logger "info" "Creating host $c " 
+    logger "ver" " Host [ $c ] wwpn $wwpn" 
     logger "debug" "  COMMAND \"ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn $wwpn -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null\""
         #ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null
     ssh ${storageInfo[stand_name]} -p 26 svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
@@ -409,6 +420,50 @@ done
     storageInfo[vdiskPerClient]=$(( storageInfo[volnum] / storageInfo[hostCount]  ))
     logger "verbose" "Total vdisk per client ${storageInfo[vdiskPerClient]}" 
 }
+
+function hostWWPNCount(){
+    local host=$1
+
+}
+function hostWWN(){
+    local host=$1
+    hostInfo[fc_host_path]="/sys/class/fc_host/"
+    hostInfo[scsi_host_path]="/sys/class/scsi_host/"
+
+    hostInfo[[$host]['fc_hosts']]=$(ssh $host "find ${hostInfo[fc_host_path]} -maxdepth 1 -mindepth 1 -type l -exec basename {} \;"  )
+    hostInfo[[$host]['fc_count']]=0
+     printf "fc host %s\n" "$(echo  ${hostInfo[[$host]['fc_hosts']]} | tr -d '\n' ) "
+     for fc_host in  $( echo ${hostInfo[[$host]['fc_hosts']]}|tr -d '\n' ); do
+        hostInfo[[$host][$fc_host]]=`ssh $host "cat ${hostInfo[fc_host_path]}/$fc_host/port_name ${hostInfo[fc_host_path]}/$fc_host/port_state ${hostInfo[scsi_host_path]}/$fc_host/link_state| tr '\n' ';'"`
+     #echo "host $host fc_host ${hostInfo[[$host][$fc_host]]} fc_count = ${hostInfo[[$host]['fc_count']]}"
+
+     if [[ $( echo ${hostInfo[[$host][$fc_host]]} | grep -i up ) ]] ; then
+         hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
+         if [[ ${hostInfo[[$host]['hostWWPN']]} == "" ]] ; then
+             hostInfo[[$host]['hostWWPN']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+              printf "WWPN online %s\n" "${hostInfo[[$host]['hostWWPN']]}"
+         else
+             hostInfo[[$host]['hostWWPN']]="${hostInfo[[$host]['hostWWPN']]}:"$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+              printf "WWPN online %s\n" "${hostInfo[[$host]['hostWWPN']]}"
+         fi
+     elif [[ $( echo ${hostInfo[[$host][$fc_host]]} | grep -i Down ) ]] ; then
+         #printf "WWPN offline %s\n" "${hostInfo[[$host]['hostWWPNoffline']]}"
+         if [[ ${hostInfo[[$host]['hostWWPNoffline']]} == "" ]] ; then
+             hostInfo[[$host]['hostWWPNoffline']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+             printf "WWPN offline %s\n" "${hostInfo[[$host]['hostWWPNoffline']]}"
+             hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
+         else
+             #hostInfo[[$host]['hostWWPNoffline']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+             hostInfo[[$host]['hostWWPNoffline']]="${hostInfo[[$host]['hostWWPNoffline']]}:"$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+             hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
+         fi
+     fi
+
+ done
+ if [[ ${hostInfo[[$host]['hostWWPN']]} != "" ]] ; then logger "info" "WWPN online ${hostInfo[[$host]['hostWWPN']]}\n" ; fi
+ if [[ ${hostInfo[[$host]['hostWWPNoffline']]} != "" ]] ; then logger "error" "WWPN offline ${hostInfo[[$host]['hostWWPNoffline']]}\n" ; fi
+}
+
 
 function clearStorageLogs() {
 	logger "info" "Cleaning Storage logs"
@@ -596,22 +651,32 @@ function storageCopyMK(){
     
 }
 
+function getHostLunSize(){
+    host=$1
+    storageInfo[lunSize]=$(ssh $host "multipath -ll| grep size | uniq | awk '{print \$1 }'| cut -f 2 -d '='")
+    storageInfo[hostLunSize]=`echo ${storageInfo[lunSize]} | sed -e 's/.$//g'`
+    let "storageInfo[hostLunSize] = ${storageInfo[hostLunSize]} - 1 "
+    logger "debug" "host name $host Volume Acutal size is ${storageInfo[lunSize]} minus ${storageInfo[hostLunSize]}" 
+
+}
+
 function vdbenchDeviceList() {
 echo " " > ${vdbench[disk_list]}
 
 for client in ${vdbench_params[clients]}; do
 count=1
-	for dev in `ssh $client multipath -l|grep "2145" | awk '{print \$1}'`; do
+    getHostLunSize $client
+    for dev in `ssh $client multipath -l|grep "2145" | awk '{print \$1}'`; do
     	device="/dev/mapper/$dev"
     	if [[ ${log[debug]} == "true" ]]; then
-            logger "debug" "vdbench sd output: sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]}g,threads=${vdbench[threads]}"
+            logger "debug" "vdbench sd output: sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[hostLunSize]}g,threads=${vdbench[threads]}"
             count=$(( count+1  ))
     	elif [[ ${log[verbose]} == "true" ]]; then
-            logger "ver" "vdbench sd output: sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]}g,threads=${vdbench[threads]}"
+            logger "ver" "vdbench sd output: sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[hostLunSize]}g,threads=${vdbench[threads]}"
             echo  "sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]}g,threads=${vdbench[threads]}" >> ${vdbench[disk_list]}
             count=$(( count+1  ))
         else
-            echo  "sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[volsize]}g,threads=${vdbench[threads]}" >> ${vdbench[disk_list]}
+            echo  "sd=$client.$count,hd=$client,lun=$device,openflags=o_direct,size=${storageInfo[hostLunSize]}g,threads=${vdbench[threads]}" >> ${vdbench[disk_list]}
             count=$(( count+1  ))
         fi
     done
@@ -619,7 +684,7 @@ done
 }
 
 function vdbenchWriteTest(){
-        echo "
+echo "
 compratio=$CP
 messagescan=no
 
@@ -641,12 +706,11 @@ include=${vdbench[disk_list]}
 wd=wd1,sd=*,xfersize=$bs,rdpct=0,rhpct=0,seekpct=0
 rd=run1,wd=wd1,iorate=max,elapsed=24h,maxdata=${vdbench[write_data]},warmup=360,interval=${vdbench[interval]}
 " >> ${vdbench[write_test]}
-
     if [[ ${log[debug]} == 'true' ]]; then
         logger "debug" "log output file ${log[output_file]}"
-        logger "debug" "./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
+        logger "debug" "${vdbench[vdbin]}/vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
 	elif [[ ${log[verbose]} == "true" ]]; then
-        logger "ver" "./vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
+        logger "ver" "${vdbench[vdbin]}/vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
         `${vdbench[vdbin]}/vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}`
     else
         `${vdbench[vdbin]}/vdbench -c -f ${vdbench[write_test]} -o ${log[test_data]}/output_$CP >> ${log[output_file]}`
@@ -679,14 +743,28 @@ rd=run1,wd=wd1,iorate=max,elapsed=24h,maxdata=${vdbench[read_data]},warmup=360,i
 
     if [[ ${log[debug]} == 'true' ]];then
         logger "debug" "log output file ${log[output_file]}"
-        logger "debug" "./vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
+        logger "debug" "${vdbench[vdbin]}/vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
 
 	elif [[ ${log[verbose]} == "true" ]]; then
-        logger "ver" "./vbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
+        logger "ver" "${vdbench[vdbin]}/vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}"
         `${vdbench[vdbin]}/vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP | tee -a ${log[output_file]}`
     else
         `${vdbench[vdbin]}/vdbench -c -f ${vdbench[read_test]} -o ${log[test_data]}/output_$CP >> ${log[output_file]}`
     fi
+}
+
+function clear_storage_logs(){
+    logger "ver" "Clearing Storage event logs"
+    ssh ${storageInfo[stand_name]} "svctask clearerrlog -force"
+}
+
+function displayVdbenchResults() {
+    declare -A testResultsData
+
+    testResultsData[write]=`cat ${log[output_file]} | grep -i avg | head -1 | tr -s ' ' ',' | sed -e 's/$/\n/'`
+    testResultsData[read]=`cat ${log[output_file]} | grep -i avg | tail -1 | tr -s ' ' ',' | sed -e 's/$/\n/'`
+    logger "info" "vdbench result \t write results [ $(echo ${testResultsData[write]} | awk '{print $3}' ) ] read results $(echo ${testResultsData[read]} | awk '{print $4 }' ) }  "
+
 }
 
 #function _info(){ echo }
@@ -713,9 +791,10 @@ fi
 for bs in ${vdbench[blocksize]}; do
 	log[testCount]=1
 	for CP in ${vdbench[cmprun]} ; do
+        clearStorageLogs
 	    if [[ ${vdbench[csdev]} == "true" ]] ; then createStorageVolumes ; fi
 	    
-		logger "info" "===[ ${log[testCount]} ]===[ blocksize | $bs ]====[ RATIO | $CP ]=============================================="
+        logger "info" "===[ ${log[testCount]} ]===[ blocksize | $bs ]====[ RATIO | $CP ]=============================================="
         getStorageVolumes
 	    vdbenchDirectoryResutls
 	    if [[ ${vdbench[hrdev]} == "true" ]] ; then hostRescan ; fi
@@ -723,6 +802,7 @@ for bs in ${vdbench[blocksize]}; do
 		vdbenchDeviceList
 		vdbenchWriteTest
 		vdbenchReadTest
+        displayVdbenchResults
 		log[testCount]=$(( log[testCount] + 1 ))
 	done
     vdbench[hsrm]="true"
