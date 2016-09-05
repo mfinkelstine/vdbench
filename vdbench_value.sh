@@ -392,29 +392,28 @@ function createHosts() {
 clients=${vdbench_params[clients]}
 storageInfo[hostCount]=0
 logger "info" "Creating hosts ${clients[@]}"
-directoryStracture[mountScripts]="/usr/global/scripts/"
+directoryStracture[mountScripts]="scriptsssss"
+directoryStracture[pathScripts]="/usr/global/scripts/"
 
 #totalFC=0
 for c in ${vdbench_params[clients]}
 do
 	storageInfo[hostCount]=$(( storageInfo[hostCount] + 1 ))
-    if ssh $c "grep -qs "${directoryStracture[mountScripts]}" /proc/mounts "; then
+    if [[ $(ssh $c "grep -qs "${directoryStracture[mountScripts]}" /proc/mounts ") == "0" ]] ; then
         logger "info" "[ ${directoryStracture[mountScripts]} ] is mounted"
-        logger "ver" "command \"awk '{print \$2 }' /proc/mounts \| grep -qs \"\^${directoryStracture[mountScripts]}\$\""
+        logger "ver" "command | grep -qs \"${directoryStracture[mountScripts]}\""
         wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
         wwpnHostCount=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep -c Up`
     else
-        logger "ver" "command \"awk '{print \[ }' /proc/mounts \| grep -qs \"\^${directoryStracture[mountScripts]}\$\"]"
+        logger "ver" "command \"awk '{print \$2 }' /proc/mounts \| grep -qs \"\^${directoryStracture[mountScripts]}\$\"]"
         logger "info" "[ ${directoryStracture[mountScripts]} ] is not mounted"
-        #wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
         wwpnHostCount=$(hostWWN $c)
     fi
-    #totalFC=$(( totalFC + $wwpnHostCount ))
-    #logger "info" "Creating host $c " 
-    logger "ver" " Host [ $c ] wwpn $wwpn" 
-    logger "debug" "  COMMAND \"ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn $wwpn -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null\""
+    logger "ver" " [$c] host wwpn ${hostInfo[[$c]['hostWWPN']]}" 
+    logger "debug" "  COMMAND \"ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]} -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null\""
         #ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null
-    ssh ${storageInfo[stand_name]} -p 26 svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
+    #ssh ${storageInfo[stand_name]} -p 26 svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
+    ssh ${storageInfo[stand_name]} -p 26 svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]}  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
 done
 	logger "info" "Total Host Created ${storageInfo[hostCount]}"
     storageInfo[vdiskPerClient]=$(( storageInfo[volnum] / storageInfo[hostCount]  ))
@@ -427,13 +426,15 @@ function hostWWPNCount(){
 }
 function hostWWN(){
     local host=$1
+    logger "info" "[ $host ] Start collecting host wwpn from "
     hostInfo[fc_host_path]="/sys/class/fc_host/"
     hostInfo[scsi_host_path]="/sys/class/scsi_host/"
 
     hostInfo[[$host]['fc_hosts']]=$(ssh $host "find ${hostInfo[fc_host_path]} -maxdepth 1 -mindepth 1 -type l -exec basename {} \;"  )
     hostInfo[[$host]['fc_count']]=0
-     printf "fc host %s\n" "$(echo  ${hostInfo[[$host]['fc_hosts']]} | tr -d '\n' ) "
-     for fc_host in  $( echo ${hostInfo[[$host]['fc_hosts']]}|tr -d '\n' ); do
+    printf "fc host %s\n" "$(echo  ${hostInfo[[$host]['fc_hosts']]} | tr -d '\n' ) "
+    for fc_host in  $( echo ${hostInfo[[$host]['fc_hosts']]}|tr -d '\n' ); do
+        logger "debug" "ssh $host "cat ${hostInfo[fc_host_path]}/$fc_host/port_name ${hostInfo[fc_host_path]}/$fc_host/port_state ${hostInfo[scsi_host_path]}/$fc_host/link_state| tr '\n' ';'""
         hostInfo[[$host][$fc_host]]=`ssh $host "cat ${hostInfo[fc_host_path]}/$fc_host/port_name ${hostInfo[fc_host_path]}/$fc_host/port_state ${hostInfo[scsi_host_path]}/$fc_host/link_state| tr '\n' ';'"`
      #echo "host $host fc_host ${hostInfo[[$host][$fc_host]]} fc_count = ${hostInfo[[$host]['fc_count']]}"
 
@@ -459,7 +460,7 @@ function hostWWN(){
          fi
      fi
 
- done
+    done
  if [[ ${hostInfo[[$host]['hostWWPN']]} != "" ]] ; then logger "info" "WWPN online ${hostInfo[[$host]['hostWWPN']]}\n" ; fi
  if [[ ${hostInfo[[$host]['hostWWPNoffline']]} != "" ]] ; then logger "error" "WWPN offline ${hostInfo[[$host]['hostWWPNoffline']]}\n" ; fi
 }
@@ -477,26 +478,26 @@ function getStorageInfo(){
 	logger "info" "${storageInfo[stand_name]} Collecting Storage Information"
 	storageInfo[svcVersion]=$( ssh -p 26 ${storageInfo[stand_name]} cat /compass/version )
 	logger "debug" "svc|version|command|\"ssh -p 26 ${storageInfo[stand_name]} cat /compass/version\" "
-	logger "ver" "svc|version|ouput|${storageInfo[svcVersion]}" 
+	logger "ver" "[svc|version|${storageInfo[svcVersion]}]" 
 
 	storageInfo[svcBuild]=$( ssh -p 26 ${storageInfo[stand_name]} cat /compass/vrmf )
-	logger "debug" "svc|build|command|\"ssh -p 26 ${storageInfo[stand_name]} cat /compass/vrmf\""
-	logger "ver" "svc|build|output|${storageInfo[svcBuild]}"
+	logger "debug" "[svc|build|command|\"ssh -p 26 ${storageInfo[stand_name]} cat /compass/vrmf\""
+	logger "ver" "[svc|build|${storageInfo[svcBuild]}]"
 
 	storageInfo[hardware]=$( ssh -p 26 ${storageInfo[stand_name]} sainfo lshardware | grep hardware | awk '{print $2}' )
 	logger "debug" "svc hardware|command|\"ssh -p 26 ${storageInfo[stand_name]} sainfo lshardware | grep hardware | awk '{print \$2}'\"" 
-	logger "ver" "svc|hardware|output|${storageInfo[hardware]}"
+	logger "ver" "[svc|hardware|${storageInfo[hardware]}]"
 
 	if [[ $( ssh -p 26 ${storageInfo[stand_name]} lscontroller -nohdr | awk '{print $1}') == "" ]]; then
 		storageInfo[backend]="none"
 		logger "debug" "svc|backend|output|${storageInfo[backend]}"
 		logger "debug" "svc|driveCount|command|\"ssh -p 26 ${storageInfo[stand_name]} lsdrive -nohdr | wc -l\""
 		storageInfo[driveCount]=$( ssh -p 26 ${storageInfo[stand_name]} lsdrive -nohdr | wc -l )
-		logger "ver" "svc|driveCount|output|${storageInfo[driveCount]}"
+		logger "ver" "[svc|driveCount|${storageInfo[driveCount]}]"
 	else
 		logger "debug" "svc|backend|command|\"ssh -p 26 ${storageInfo[stand_name]} sainfo lscontroller -nohdr| awk '{print \$1}'\"" 
-		storageInfo[backend]=$( ssh stcon "/opt/FCCon/fcconnect.pl -op showconn -stor ${storageInfo[stand_name]} | grep Storage | awk '{print \$3}'" )
-		logger "ver" "svc|backend|output|${storageInfo[backend]}"
+		storageInfo[backend]=$( ssh stcon "/opt/FCCon/fcconnect.pl -op showconn -stor ${storageInfo[stand_name]} | grep Storage | awk '{print \$3}' 2>/dev/null " )
+		logger "ver" "[svc|backend|${storageInfo[backend]}]"
 	fi
 
 }
@@ -635,18 +636,17 @@ function storageCopyMK(){
 #                if ($2 ~ /SV1/ )                type="CAYMAN"
 #                if ($2 ~ /600/ )                type="FAB2"
 #                if ($2 ~ /S01/ )                type="Lenovo"
-    if   [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]]; then
+    if   [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$[SV1]/ ]]; then
         logger "info" "1 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
         scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
         ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
-    elif [[ ${storageInfo[hardware]} =~ // ]];then
-        logger "info" "2 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
-        scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
-        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
+    elif [[ ${storageInfo[hardware]} =~ /[DH8]|[T5H]/ ]];then
+        logger "info" "2 copying files to ${storageInfo[stand_name]} ${storageInfo[mkArray]}"
+        scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkArray]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
+        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]}"
     else
-        logger "info" "3 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
-        scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
-        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
+        logger "info" "Error unknow system hardware"
+        exit
     fi
     
 }
