@@ -29,6 +29,8 @@ storageInfo[localScriptPath]="/usr/global/scripts/SVC"
 storageInfo[mkVdisks]="mk_vdisks"
 storageInfo[mkArray]="mk_arrays_master"
 
+#### color sheame
+
 printf "test time stemp %s\n" ${log[timestamp]}
 
 wrap_color() {
@@ -315,7 +317,6 @@ printf "%10s | %1s\n" "vdbench key" "param value"
 	do
 		logger info  "$param:${vdbench_params[$param]}"
 	done
-
 }
 function logger(){
 	#echo "[`date '+%d/%m/%y %H:%M:%S:%2N'`]" $@
@@ -325,8 +326,10 @@ function logger(){
 		if [[ ${log[debug]} == "true" ]] ; then printf "[%s] [%s  ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "DEBUG" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[debug]}; fi
 	elif [[ $type == "info" ]] ; then
 		printf "[%s] [%s   ] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "INFO" "$ouput" | tee -a ${log[info]}
+	elif [[ $type == "warn" ]] ; then
+		printf "[%s] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "WARNING" "$ouput" | tee -a ${log[info]}
 	elif [[ $type == "error" ]] ; then
-		printf "[%s] [%s     ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "ERROR" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]}
+		printf "[%s] [%s  ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "ERROR" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]}
 	elif [[ $type == "fetal" ]] ; then
 		printf "[%s] [%s  ] [%s] %s\n" "`date '+%d/%m/%y %H:%M:%S:%2N'`" "FETAL" "${FUNCNAME[1]}" "$ouput" | tee -a ${log[error]} ; exit
 	elif [[ $type == "ver" || $type == "verbose" ]] ; then
@@ -392,7 +395,7 @@ function createHosts() {
 clients=${vdbench_params[clients]}
 storageInfo[hostCount]=0
 logger "info" "Creating hosts ${clients[@]}"
-directoryStracture[mountScripts]="scriptsssss"
+directoryStracture[mountScripts]="scripts"
 directoryStracture[pathScripts]="/usr/global/scripts/"
 
 #totalFC=0
@@ -407,7 +410,8 @@ do
     else
         logger "ver" "command \"awk '{print \$2 }' /proc/mounts \| grep -qs \"\^${directoryStracture[mountScripts]}\$\"]"
         logger "info" "[ ${directoryStracture[mountScripts]} ] is not mounted"
-        wwpnHostCount=$(hostWWN $c)
+        #wwpnHostCount=$(hostWWN $c)
+        hostWWN $c
     fi
     logger "ver" " [$c] host wwpn ${hostInfo[[$c]['hostWWPN']]}" 
     logger "debug" "  COMMAND \"ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]} -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null\""
@@ -432,7 +436,9 @@ function hostWWN(){
 
     hostInfo[[$host]['fc_hosts']]=$(ssh $host "find ${hostInfo[fc_host_path]} -maxdepth 1 -mindepth 1 -type l -exec basename {} \;"  )
     hostInfo[[$host]['fc_count']]=0
-    printf "fc host %s\n" "$(echo  ${hostInfo[[$host]['fc_hosts']]} | tr -d '\n' ) "
+    hostInfo[[$host]['onlineWWNCount']]=0
+    hostInfo[[$host]['offlineWWNCount']]=0
+    #printf "fc host %s\n" "$(echo  ${hostInfo[[$host]['fc_hosts']]} | tr -d '\n' ) "
     for fc_host in  $( echo ${hostInfo[[$host]['fc_hosts']]}|tr -d '\n' ); do
         logger "debug" "ssh $host "cat ${hostInfo[fc_host_path]}/$fc_host/port_name ${hostInfo[fc_host_path]}/$fc_host/port_state ${hostInfo[scsi_host_path]}/$fc_host/link_state| tr '\n' ';'""
         hostInfo[[$host][$fc_host]]=`ssh $host "cat ${hostInfo[fc_host_path]}/$fc_host/port_name ${hostInfo[fc_host_path]}/$fc_host/port_state ${hostInfo[scsi_host_path]}/$fc_host/link_state| tr '\n' ';'"`
@@ -440,29 +446,34 @@ function hostWWN(){
 
      if [[ $( echo ${hostInfo[[$host][$fc_host]]} | grep -i up ) ]] ; then
          hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
+         hostInfo[[$host]['onlineWWNCount']]=$(( hostInfo[[$host]['onlineWWNCount']]+1 ))
          if [[ ${hostInfo[[$host]['hostWWPN']]} == "" ]] ; then
              hostInfo[[$host]['hostWWPN']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
-              printf "WWPN online %s\n" "${hostInfo[[$host]['hostWWPN']]}"
+             logger "ver" "WWPN online ${hostInfo[[$host]['hostWWPN']]}"
          else
              hostInfo[[$host]['hostWWPN']]="${hostInfo[[$host]['hostWWPN']]}:"$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
-              printf "WWPN online %s\n" "${hostInfo[[$host]['hostWWPN']]}"
+              #printf "WWPN online %s\n" "${hostInfo[[$host]['hostWWPN']]}"
+             logger "ver" "WWPN online ${hostInfo[[$host]['hostWWPN']]}"
          fi
      elif [[ $( echo ${hostInfo[[$host][$fc_host]]} | grep -i Down ) ]] ; then
-         #printf "WWPN offline %s\n" "${hostInfo[[$host]['hostWWPNoffline']]}"
+         hostInfo[[$host]['offlineWWNCount']]=$(( hostInfo[[$host]['offlineWWNCount']]+1 ))
+         hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
          if [[ ${hostInfo[[$host]['hostWWPNoffline']]} == "" ]] ; then
              hostInfo[[$host]['hostWWPNoffline']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
-             printf "WWPN offline %s\n" "${hostInfo[[$host]['hostWWPNoffline']]}"
-             hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
+             logger "ver" "WWPN offline %s ${hostInfo[[$host]['hostWWPNoffline']]}"
          else
-             #hostInfo[[$host]['hostWWPNoffline']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
              hostInfo[[$host]['hostWWPNoffline']]="${hostInfo[[$host]['hostWWPNoffline']]}:"$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
-             hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
          fi
      fi
 
     done
- if [[ ${hostInfo[[$host]['hostWWPN']]} != "" ]] ; then logger "info" "WWPN online ${hostInfo[[$host]['hostWWPN']]}\n" ; fi
- if [[ ${hostInfo[[$host]['hostWWPNoffline']]} != "" ]] ; then logger "error" "WWPN offline ${hostInfo[[$host]['hostWWPNoffline']]}\n" ; fi
+    if [[ ${hostInfo[[$host]['hostWWPN']]} != "" ]] ; then logger "info" "WWPN online ${hostInfo[[$host]['hostWWPN']]}" ; fi
+    if [[ ${hostInfo[[$host]['hostWWPNoffline']]} != "" ]] ; then logger "warn" "WWPN offline ${hostInfo[[$host]['hostWWPNoffline']]}" ; fi
+    
+    if (( ${hostInfo[[$host]['onlineWWNCount']]} % 2 != "0" ))  ; then
+        logger "error" "$host has only ${hostInfo[[$host]['onlineWWNCount']]} fc ports online "
+        exit
+    fi
 }
 
 
@@ -496,7 +507,7 @@ function getStorageInfo(){
 		logger "ver" "[svc|driveCount|${storageInfo[driveCount]}]"
 	else
 		logger "debug" "svc|backend|command|\"ssh -p 26 ${storageInfo[stand_name]} sainfo lscontroller -nohdr| awk '{print \$1}'\"" 
-		storageInfo[backend]=$( ssh stcon "/opt/FCCon/fcconnect.pl -op showconn -stor ${storageInfo[stand_name]} | grep Storage | awk '{print \$3}' 2>/dev/null " )
+		storageInfo[backend]=$( ssh stcon "/opt/FCCon/fcconnect.pl -op showconn -stor ${storageInfo[stand_name]} | grep Storage | awk '{print \$3}'" 2>/dev/null  )
 		logger "ver" "[svc|backend|${storageInfo[backend]}]"
 	fi
 
@@ -583,42 +594,49 @@ storageInfo[mkMasterArray]="${storageInfo[remoteScriptsPath]}/${storageInfo[mkAr
 storageInfo[mkVdisk]="${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} fc 1 ${storageInfo[volnum]} "
 logger "info" "Running with storage hardware  ${storageInfo[hardware]}"
 
-if [[ ${storageInfo[hardware]} == @(T5H|4500|1300|600) ]]; then
+storageInfo[mkVdiskPattern]="^T5H|SV1|DH8$"
+storageInfo[mkArrayPattern]="^[456]00$"
+
+
+if [[ ${storageInfo[hardware]} =~ ${storageInfo[mkArrayPattern]} ]]; then
+    logger "info" "storage based drives ${storageInfo[hardware]} "
 	storageInfo[arrayGroup]=8
     storageInfo[driveCount]=$(ssh -p 26 ${storageInfo[stand_name]} lsdrive -nohdr | wc -l)
     storageInfo[numberMdiskGroup]=$(( ${storageInfo[driveCount]} / ${storageInfo[arrayGroup]} ))
 	storageInfo[mkMasterArray]+="${storageInfo[driveCount]} ${storageInfo[arrayGroup]} ${storageInfo[numberMdiskGroup]} "
 	storageInfo[mkMasterArray]+="${storageInfo[volnum]} ${storageInfo[volsize]} ${storageInfo[voltype]} NOFMT NOSCRUB"
+    storageCopyMK
 
-	if [[ $(ssh ${storageInfo[stand_name]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} ]") -eq "0" ]];
-    then
-
-        if [[ ${log[debug]} =~ "true" ]]; then
-        	logger "debug" "Running with FAB configuration with ouput"
-            logger "debug" "ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
-        elif [[ ${log[verbose]} == "true" ]]; then
-            logger "ver" "Running with FAB configuration with ouput"
-    		logger "ver" "command| ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
-            ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
-        else
-            logger "info" "Creating volumes on ${storageInfo[stand_name]}"
-            ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
-        fi
+    if [[ ${log[debug]} =~ "true" ]]; then
+        logger "debug" "ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
+    elif [[ ${log[verbose]} == "true" ]]; then
+    	logger "ver" "command| ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
+        ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
     else
-		logger "error" "${storageInfo[mkArray]} does not exist on ${storageInfo[stand_name]} path ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
-        storageCopyMK
-        continue 1
-    fi 
-elif [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$/ ]] ; then
-    logger "info" "Running with BFN configuration"
-	if [[ $(ssh ${storageInfo[stand_name]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} ]") -ne "0" ]];
-	then
-		logger "error" "${storageInfo[mkVdisks]} does not exist on ${storageInfo[stand_name]} path ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
-        storageCopyMK
-        continue 1
-	else
-       	ssh ${storageInfo[stand_name]} -p 26 ${storageInfo[mkVdisk]} fc 1 ${storageInfo[volnum]} 495600 0 NOFMT COMPRESSED AUTOEXP &> ${log[globalLog]}
-	fi 
+        logger "info" "Creating volumes on ${storageInfo[stand_name]}"
+        logger "info" "mkArray=[${storageInfo[mkMasterArray]}]"
+        ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
+    fi
+
+elif [[ ${storageInfo[hardware]} =~ ${storageInfo[mkVdiskPattern]} ]] ; then
+    logger "info" "storage based mdisks  ${storageInfo[hardware]} "
+    storageCopyMK
+    storageInfo[mkVdisk]=${storageInfo[mkVdisk]}" $(( ${storageInfo[volsize]} * 1000 ))"
+    storageInfo[mkVdisk]=${storageInfo[mkVdisk]}" 0 NOFMT COMPRESSED AUTOEXP"
+
+#   printf "mkVdisk=[%s]" "${storageInfo[mkVdisk]}"
+    if [[ ${log[debug]} =~ "true" ]]; then
+        logger "debug" "ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkVdisk]}"
+    elif [[ ${log[verbose]} == "true" ]]; then
+    	logger "ver" "command| ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
+        ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkVdisk]} &> ${log[globalLog]}
+    else
+        logger "info" "Creating volumes on ${storageInfo[stand_name]}"
+        logger "info" "mkVdisk=${storageInfo[mkVdisk]}"
+       	#ssh ${storageInfo[stand_name]} -p 26 ${storageInfo[mkVdisk]} fc 1 ${storageInfo[volnum]} 495600 0 NOFMT COMPRESSED AUTOEXP &> ${log[globalLog]}
+       	ssh ${storageInfo[stand_name]} -p 26 ${storageInfo[mkVdisk]} &> ${log[globalLog]}
+    fi
+	#	logger "error" "${storageInfo[mkVdisks]} does not exist on ${storageInfo[stand_name]} path ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
 else
     logger "info" "Unknown Hardware Type [ ${storageInfo[hardware]} ]"
     exit
@@ -629,21 +647,34 @@ sleep 10
 function storageCopyMK(){
 #        if ($1 == "hardware") {
 #                if ($2 ~ /^[48C][AFG][248]$/)   type="SVC"      ### Matches 4F2 8F2 8F4 8G4 8A4 CF8 CG8
-#                if ($2 == "DH8")                type="BFN"
-#                if ($2 ~ /[13]00/ )             type="V7000"
+#                if ($2 == "DH8")                type="BFN"      ### mkVdisks
+#                if ($2 ~ /[13]00/ )             type="V7000"    ### mkArray
 #                if ($2 ~ /[45]00/ )             type="FAB1"     ### 400 is 6-core FAB
-#                if ($2 ~ /T5H/ )                type="TB5"
-#                if ($2 ~ /SV1/ )                type="CAYMAN"
-#                if ($2 ~ /600/ )                type="FAB2"
+#                if ($2 ~ /T5H/ )                type="TB5"      ### mkVdisks
+#                if ($2 ~ /SV1/ )                type="CAYMAN"   ### mkVdisks
+#                if ($2 ~ /500/ )                type="FAB1"     ### mkArray
+#                if ($2 ~ /600/ )                type="FAB2"     ### mkArray
 #                if ($2 ~ /S01/ )                type="Lenovo"
-    if   [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248]$[SV1]/ ]]; then
-        logger "info" "1 copying files to ${storageInfo[stand_name]} ${storageInfo[mkVdisks]}"
-        scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
-        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
-    elif [[ ${storageInfo[hardware]} =~ /[DH8]|[T5H]/ ]];then
-        logger "info" "2 copying files to ${storageInfo[stand_name]} ${storageInfo[mkArray]}"
-        scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkArray]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
-        ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]}"
+   # /^[T5H][SV1][S01][13][456]00$/ mkVdisk
+   # /^[13]00[456]00$/ mkArray
+    #if   [[ ${storageInfo[hardware]} =~ /^[48C][AFG][248][SV1]$/ ]]; then
+    
+    #if [[ ${storageInfo[hardware]} =~ ^[13456]00|[SV1]|[T5H]|[S01]$ ]]; then
+    if [[ ${storageInfo[hardware]} =~ ${storageInfo[mkVdiskPattern]} ]]; then
+        logger "info" "Checking if ${storageInfo[mkVdisk]} exist"
+        if [[ $(ssh ${storageInfo[stand_name]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} ]") -ne "0" ]]; then
+		    logger "warn" "${storageInfo[mkVdisks]} does not exist on ${storageInfo[stand_name]} path ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
+            scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
+            logger "ver" "changing permission to ${storageInfo[mkVdisks]}"
+            ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
+        fi
+    elif [[ ${storageInfo[hardware]} =~ ${storageInfo[mkArrayPattern]} ]];then
+	    if [[ $(ssh ${storageInfo[stand_name]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]} ]") -ne "0" ]]; then
+            logger "warn" "copying files to ${storageInfo[stand_name]} ${storageInfo[mkArray]}"
+            scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkArray]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
+            logger "ver" "changing permission to ${storageInfo[mkArray]}"
+            ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]}"
+        fi
     else
         logger "info" "Error unknow system hardware"
         exit
