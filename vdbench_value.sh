@@ -28,6 +28,10 @@ storageInfo[remoteScriptsPath]="/home"
 storageInfo[localScriptPath]="/usr/global/scripts/SVC"
 storageInfo[mkVdisks]="mk_vdisks"
 storageInfo[mkArray]="mk_arrays_master"
+storageInfo[jsonFile]="storageInfo.json"
+#### global params #### 
+hostInfo[totalOLFCount]=0   # total online FC count
+hostInfo[totalOFFCount]=0   # total offline FC count
 
 #### color sheame
 
@@ -242,11 +246,11 @@ if [[ ! ${vdbench_params[clients]}  ]];then
 fi
 
 if [[ ! ${vdbench_params[hsrm]}  ]]; then
-    vdbench[hsrm]="true"
+    vdbench[hsrm]="true"    # hsot storage remove
 fi
 
 if [[ ! ${vdbench_params[hrdev]}  ]]; then
-    vdbench[hrdev]="true"
+    vdbench[hrdev]="true"   # host remove devices
 fi
 
 if [[ ! ${vdbench_params[cshost]}  ]]; then
@@ -345,12 +349,12 @@ function debug(){
 }
 
 function storageRemoveHosts() {
-	logger "info" "Removing Existing hosts : "$(ssh -p 26 ${storageInfo[stand_name]} lshost -nohdr | awk '{print $2}' | tr "\n" "," | sed -e 's/,$//g')
+	logger "info" "Removing Existing hosts : "$( ${storageInfo[storageSSH]} lshost -nohdr | awk '{print $2}' | tr "\n" "," | sed -e 's/,$//g')
 
     if [[ ${log[debug]} == "true" ]] ; then 
-		logger "debug" "ssh -p 26 ${storageInfo[stand_name]} \"i=\"0\"; while [ 1 -lt \`lshost|wc -l\` ]; do echo -e \"host_id \$i \n \"; svctask rmhost -force \$i; i=\$[\$i+1]; done\" "
+		logger "debug" "${storageInfo[storageSSH]} \"i=\"0\"; while [ 1 -lt \`lshost|wc -l\` ]; do echo -e \"host_id \$i \n \"; svctask rmhost -force \$i; i=\$[\$i+1]; done\" "
 	else
-		ssh -p 26 ${storageInfo[stand_name]} "i=\"0\"; while [ 1 -lt \`lshost|wc -l\` ]; do svctask rmhost -force \$i; i=\$[\$i+1]; done"
+		${storageInfo[storageSSH]} "i=\"0\"; while [ 1 -lt \`lshost|wc -l\` ]; do svctask rmhost -force \$i; i=\$[\$i+1]; done"
 	fi
 	sleep 2
 }
@@ -373,18 +377,17 @@ function hostRescan(){
 }
 
 function removeMdiskGroup(){
-	mdiskid=`ssh -p 26 ${storageInfo[stand_name]} ""lsmdiskgrp |grep -v id | sed -r 's/^[^0-9]*([0-9]+).*$/\1/'""`
-	countMdiskids=`ssh -p 26 ${storageInfo[stand_name]} "lsmdiskgrp -nohdr | wc -l "`
-#    logger "info" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
+	mdiskid=`${storageInfo[storageSSH]} ""lsmdiskgrp |grep -v id | sed -r 's/^[^0-9]*([0-9]+).*$/\1/'""`
+	countMdiskids=`${storageInfo[storageSSH]} "lsmdiskgrp -nohdr | wc -l "`
     if [[ $countMdiskids -ge "1" ]]; then
         if   [[ ${log[debug]} == "true" ]]; then
             logger "debug" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
         elif [[ ${log[verbose]} == "true" ]]; then
             logger "info" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
-		    ssh -p 26 ${storageInfo[stand_name]} svctask rmmdiskgrp -force $mdiskid
+		    ${storageInfo[storageSSH]} svctask rmmdiskgrp -force $mdiskid
         else 
             logger "info" "Removing mdiskgrp id : $mdiskid from ${storageInfo[stand_name]}" 
-	        ssh -p 26 ${storageInfo[stand_name]} svctask rmmdiskgrp -force $mdiskid
+	        ${storageInfo[storageSSH]} svctask rmmdiskgrp -force $mdiskid
         fi
     else
         logger "info" "No mdiskgrp exist on ${storageInfo[stand_name]}" 
@@ -402,7 +405,8 @@ directoryStracture[pathScripts]="/usr/global/scripts/"
 for c in ${vdbench_params[clients]}
 do
 	storageInfo[hostCount]=$(( storageInfo[hostCount] + 1 ))
-    if [[ $(ssh $c "grep -qs "${directoryStracture[mountScripts]}" /proc/mounts ") == "0" ]] ; then
+    if ssh $c "grep -qs "${directoryStracture[mountScripts]}" /proc/mounts " ; then
+    #if [[ $(ssh $c "grep -qs "${directoryStracture[mountScripts]}" /proc/mounts ") == "0" ]] ; then
         logger "info" "[ ${directoryStracture[mountScripts]} ] is mounted"
         logger "ver" "command | grep -qs \"${directoryStracture[mountScripts]}\""
         wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
@@ -410,15 +414,21 @@ do
     else
         logger "ver" "command \"awk '{print \$2 }' /proc/mounts \| grep -qs \"\^${directoryStracture[mountScripts]}\$\"]"
         logger "info" "[ ${directoryStracture[mountScripts]} ] is not mounted"
-        #wwpnHostCount=$(hostWWN $c)
         hostWWN $c
     fi
+    storageInfo[mkhost]="svctask mkhost -fcwwpn "
+    storageInfo[mkhost]=${storageInfo[mkhost]}" ${hostInfo[[$c]['hostWWPN']]} "
+    storageInfo[mkhost]=${storageInfo[mkhost]}" -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 "
+    storageInfo[mkhost]=${storageInfo[mkhost]}"-name $c -type generic"
+    #storageInfo[mkhost]=${storageInfo[mkhost]}"-name $c -type generic 2>/dev/null "
+
     logger "ver" " [$c] host wwpn ${hostInfo[[$c]['hostWWPN']]}" 
-    logger "debug" "  COMMAND \"ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]} -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null\""
-        #ssh -p 26 ${storageInfo[stand_name]} svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null
-    #ssh ${storageInfo[stand_name]} -p 26 svctask mkhost -fcwwpn $wwpn  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
-    ssh ${storageInfo[stand_name]} -p 26 svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]}  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
+    logger "debug" "  COMMAND \"${storageInfo[storageSSH]} ${storageInfo[mkhost]}\""
+    #logger "debug" "  COMMAND \"${storageInfo[storageSSH]} svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]} -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null\""
+    #${storageInfo[storageSSH]} svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]}  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
+    ${storageInfo[storageSSH]} ${storageInfo[mkhost]} 2>/dev/null
 done
+
 	logger "info" "Total Host Created ${storageInfo[hostCount]}"
     storageInfo[vdiskPerClient]=$(( storageInfo[volnum] / storageInfo[hostCount]  ))
     logger "verbose" "Total vdisk per client ${storageInfo[vdiskPerClient]}" 
@@ -433,7 +443,6 @@ function hostWWN(){
     logger "info" "[ $host ] Start collecting host wwpn from "
     hostInfo[fc_host_path]="/sys/class/fc_host/"
     hostInfo[scsi_host_path]="/sys/class/scsi_host/"
-
     hostInfo[[$host]['fc_hosts']]=$(ssh $host "find ${hostInfo[fc_host_path]} -maxdepth 1 -mindepth 1 -type l -exec basename {} \;"  )
     hostInfo[[$host]['fc_count']]=0
     hostInfo[[$host]['onlineWWNCount']]=0
@@ -445,28 +454,30 @@ function hostWWN(){
      #echo "host $host fc_host ${hostInfo[[$host][$fc_host]]} fc_count = ${hostInfo[[$host]['fc_count']]}"
 
      if [[ $( echo ${hostInfo[[$host][$fc_host]]} | grep -i up ) ]] ; then
-         hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
-         hostInfo[[$host]['onlineWWNCount']]=$(( hostInfo[[$host]['onlineWWNCount']]+1 ))
-         if [[ ${hostInfo[[$host]['hostWWPN']]} == "" ]] ; then
-             hostInfo[[$host]['hostWWPN']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
-             logger "ver" "WWPN online ${hostInfo[[$host]['hostWWPN']]}"
-         else
-             hostInfo[[$host]['hostWWPN']]="${hostInfo[[$host]['hostWWPN']]}:"$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
-              #printf "WWPN online %s\n" "${hostInfo[[$host]['hostWWPN']]}"
-             logger "ver" "WWPN online ${hostInfo[[$host]['hostWWPN']]}"
-         fi
+        hostInfo[totalOLFCount]=$(( hostInfo[totalOLFCount]+1 ))
+        hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
+        hostInfo[[$host]['onlineWWNCount']]=$(( hostInfo[[$host]['onlineWWNCount']]+1 ))
+        if [[ ${hostInfo[[$host]['hostWWPN']]} == "" ]] ; then
+            hostInfo[[$host]['hostWWPN']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+            logger "ver" "WWPN online ${hostInfo[[$host]['hostWWPN']]}"
+        else
+            hostInfo[[$host]['hostWWPN']]="${hostInfo[[$host]['hostWWPN']]}:"$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+            #printf "WWPN online %s\n" "${hostInfo[[$host]['hostWWPN']]}"
+            logger "ver" "WWPN online ${hostInfo[[$host]['hostWWPN']]}"
+        fi
      elif [[ $( echo ${hostInfo[[$host][$fc_host]]} | grep -i Down ) ]] ; then
-         hostInfo[[$host]['offlineWWNCount']]=$(( hostInfo[[$host]['offlineWWNCount']]+1 ))
-         hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
-         if [[ ${hostInfo[[$host]['hostWWPNoffline']]} == "" ]] ; then
-             hostInfo[[$host]['hostWWPNoffline']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
-             logger "ver" "WWPN offline %s ${hostInfo[[$host]['hostWWPNoffline']]}"
-         else
-             hostInfo[[$host]['hostWWPNoffline']]="${hostInfo[[$host]['hostWWPNoffline']]}:"$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
-         fi
+        hostInfo[totalOFFCount]=$(( hostInfo[totalOFFCount]+1 ))
+        hostInfo[[$host]['offlineWWNCount']]=$(( hostInfo[[$host]['offlineWWNCount']]+1 ))
+        hostInfo[[$host]['fc_count']]=$(( hostInfo[[$host]['fc_count']]+1 ))
+        if [[ ${hostInfo[[$host]['hostWWPNoffline']]} == "" ]] ; then
+            hostInfo[[$host]['hostWWPNoffline']]=$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+            logger "ver" "WWPN offline %s ${hostInfo[[$host]['hostWWPNoffline']]}"
+        else
+            hostInfo[[$host]['hostWWPNoffline']]="${hostInfo[[$host]['hostWWPNoffline']]}:"$(echo ${hostInfo[[$host][$fc_host]]}|awk -F';' '{print $1}' | sed -e 's/^0x//g' )
+        fi
      fi
-
     done
+
     if [[ ${hostInfo[[$host]['hostWWPN']]} != "" ]] ; then logger "info" "WWPN online ${hostInfo[[$host]['hostWWPN']]}" ; fi
     if [[ ${hostInfo[[$host]['hostWWPNoffline']]} != "" ]] ; then logger "warn" "WWPN offline ${hostInfo[[$host]['hostWWPNoffline']]}" ; fi
     
@@ -479,7 +490,7 @@ function hostWWN(){
 
 function clearStorageLogs() {
 	logger "info" "Cleaning Storage logs"
-	ssh -p 26 ${storageInfo[stand_name]} svctask clearerrlog -force
+	${storageInfo[storageSSH]} svctask clearerrlog -force
 }
 function initLogger(){
 logger "test"
@@ -487,39 +498,39 @@ logger "test"
 }
 function getStorageInfo(){
 	logger "info" "${storageInfo[stand_name]} Collecting Storage Information"
-	storageInfo[svcVersion]=$( ssh -p 26 ${storageInfo[stand_name]} cat /compass/version )
-	logger "debug" "svc|version|command|\"ssh -p 26 ${storageInfo[stand_name]} cat /compass/version\" "
+	storageInfo[svcVersion]=$( ${storageInfo[storageSSH]} cat /compass/version )
+	logger "debug" "svc|version|command|\"${storageInfo[storageSSH]} cat /compass/version\" "
 	logger "ver" "[svc|version|${storageInfo[svcVersion]}]" 
 
-	storageInfo[svcBuild]=$( ssh -p 26 ${storageInfo[stand_name]} cat /compass/vrmf )
-	logger "debug" "[svc|build|command|\"ssh -p 26 ${storageInfo[stand_name]} cat /compass/vrmf\""
+	storageInfo[svcBuild]=$( ${storageInfo[storageSSH]} cat /compass/vrmf )
+	logger "debug" "[svc|build|command|\"${storageInfo[storageSSH]} cat /compass/vrmf\""
 	logger "ver" "[svc|build|${storageInfo[svcBuild]}]"
 
-	storageInfo[hardware]=$( ssh -p 26 ${storageInfo[stand_name]} sainfo lshardware | grep hardware | awk '{print $2}' )
-	logger "debug" "svc hardware|command|\"ssh -p 26 ${storageInfo[stand_name]} sainfo lshardware | grep hardware | awk '{print \$2}'\"" 
+	storageInfo[hardware]=$( ${storageInfo[storageSSH]} sainfo lshardware | grep hardware | awk '{print $2}' )
+	logger "debug" "svc hardware|command|\"${storageInfo[storageSSH]} sainfo lshardware | grep hardware | awk '{print \$2}'\"" 
 	logger "ver" "[svc|hardware|${storageInfo[hardware]}]"
+    storageInfo[RaceMQVersion]=$( ${storageInfo[storageSSH]} /data/race/rtc_racemqd -v | grep race | awk '{print $2}')
 
-	if [[ $( ssh -p 26 ${storageInfo[stand_name]} lscontroller -nohdr | awk '{print $1}') == "" ]]; then
+	if [[ $( ${storageInfo[storageSSH]} lscontroller -nohdr | awk '{print $1}') == "" ]]; then
 		storageInfo[backend]="none"
 		logger "debug" "svc|backend|output|${storageInfo[backend]}"
-		logger "debug" "svc|driveCount|command|\"ssh -p 26 ${storageInfo[stand_name]} lsdrive -nohdr | wc -l\""
-		storageInfo[driveCount]=$( ssh -p 26 ${storageInfo[stand_name]} lsdrive -nohdr | wc -l )
+		logger "debug" "svc|driveCount|command|\"${storageInfo[storageSSH]} lsdrive -nohdr | wc -l\""
+		storageInfo[driveCount]=$( ${storageInfo[storageSSH]} lsdrive -nohdr | wc -l )
 		logger "ver" "[svc|driveCount|${storageInfo[driveCount]}]"
 	else
-		logger "debug" "svc|backend|command|\"ssh -p 26 ${storageInfo[stand_name]} sainfo lscontroller -nohdr| awk '{print \$1}'\"" 
+		logger "debug" "svc|backend|command|\"${storageInfo[storageSSH]} sainfo lscontroller -nohdr| awk '{print \$1}'\"" 
 		storageInfo[backend]=$( ssh stcon "/opt/FCCon/fcconnect.pl -op showconn -stor ${storageInfo[stand_name]} | grep Storage | awk '{print \$3}'" 2>/dev/null  )
 		logger "ver" "[svc|backend|${storageInfo[backend]}]"
 	fi
-
 }
 
 function getStorageVolumes(){
-		logger "debug" "svc|mdiskCount|command|\"ssh -p 26 ${storageInfo[stand_name]} lsmdisk -nohdr | wc -l\""
-		storageInfo[mdiskCount]=$( ssh -p 26 ${storageInfo[stand_name]} lsmdisk -nohdr | wc -l )
+		logger "debug" "svc|mdiskCount|command|\"${storageInfo[storageSSH]} lsmdisk -nohdr | wc -l\""
+		storageInfo[mdiskCount]=$( ${storageInfo[storageSSH]} lsmdisk -nohdr | wc -l )
 		logger "ver" "svc|mdiskCount|output|${storageInfo[mdiskCount]}"
 
-		logger "debug" "svc|mdiskSize|command|\"ssh -p 26 ${storageInfo[stand_name]} lsmdisk -nohdr | awk '{ print $7 }' | uniq | tr '\n' ' '\""
-		storageInfo[mdiskSize]=$( ssh -p 26 ${storageInfo[stand_name]} lsmdisk -nohdr | awk '{ print $7 }' | uniq | tr '\n' ' ' )
+		logger "debug" "svc|mdiskSize|command|\"${storageInfo[storageSSH]} lsmdisk -nohdr | awk '{ print $7 }' | uniq | tr '\n' ' '\""
+		storageInfo[mdiskSize]=$( ${storageInfo[storageSSH]} lsmdisk -nohdr | awk '{ print $7 }' | uniq | tr '\n' ' ' )
 		logger "ver" "svc|mdiskSize|output|${storageInfo[mdiskSize]}"
 }
 
@@ -601,21 +612,21 @@ storageInfo[mkArrayPattern]="^[456]00$"
 if [[ ${storageInfo[hardware]} =~ ${storageInfo[mkArrayPattern]} ]]; then
     logger "info" "storage based drives ${storageInfo[hardware]} "
 	storageInfo[arrayGroup]=8
-    storageInfo[driveCount]=$(ssh -p 26 ${storageInfo[stand_name]} lsdrive -nohdr | wc -l)
+    storageInfo[driveCount]=$( ${storageInfo[storageSSH]} lsdrive -nohdr | wc -l)
     storageInfo[numberMdiskGroup]=$(( ${storageInfo[driveCount]} / ${storageInfo[arrayGroup]} ))
 	storageInfo[mkMasterArray]+="${storageInfo[driveCount]} ${storageInfo[arrayGroup]} ${storageInfo[numberMdiskGroup]} "
 	storageInfo[mkMasterArray]+="${storageInfo[volnum]} ${storageInfo[volsize]} ${storageInfo[voltype]} NOFMT NOSCRUB"
     storageCopyMK
 
     if [[ ${log[debug]} =~ "true" ]]; then
-        logger "debug" "ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
+        logger "debug" "${storageInfo[storageSSH]} ${storageInfo[mkMasterArray]}"
     elif [[ ${log[verbose]} == "true" ]]; then
-    	logger "ver" "command| ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
-        ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
+    	logger "ver" "command|${storageInfo[storageSSH]} ${storageInfo[mkMasterArray]}"
+        ${storageInfo[storageSSH]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
     else
         logger "info" "Creating volumes on ${storageInfo[stand_name]}"
         logger "info" "mkArray=[${storageInfo[mkMasterArray]}]"
-        ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
+        ${storageInfo[storageSSH]} ${storageInfo[mkMasterArray]} &> ${log[globalLog]}
     fi
 
 elif [[ ${storageInfo[hardware]} =~ ${storageInfo[mkVdiskPattern]} ]] ; then
@@ -626,15 +637,15 @@ elif [[ ${storageInfo[hardware]} =~ ${storageInfo[mkVdiskPattern]} ]] ; then
 
 #   printf "mkVdisk=[%s]" "${storageInfo[mkVdisk]}"
     if [[ ${log[debug]} =~ "true" ]]; then
-        logger "debug" "ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkVdisk]}"
+        logger "debug" "${storageInfo[storageSSH]} ${storageInfo[mkVdisk]}"
     elif [[ ${log[verbose]} == "true" ]]; then
-    	logger "ver" "command| ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkMasterArray]}"
-        ssh -p 26 ${storageInfo[stand_name]} ${storageInfo[mkVdisk]} &> ${log[globalLog]}
+    	logger "ver" "command| ${storageInfo[storageSSH]} ${storageInfo[mkMasterArray]}"
+        ${storageInfo[storageSSH]} ${storageInfo[mkVdisk]} &> ${log[globalLog]}
     else
         logger "info" "Creating volumes on ${storageInfo[stand_name]}"
         logger "info" "mkVdisk=${storageInfo[mkVdisk]}"
        	#ssh ${storageInfo[stand_name]} -p 26 ${storageInfo[mkVdisk]} fc 1 ${storageInfo[volnum]} 495600 0 NOFMT COMPRESSED AUTOEXP &> ${log[globalLog]}
-       	ssh ${storageInfo[stand_name]} -p 26 ${storageInfo[mkVdisk]} &> ${log[globalLog]}
+       	${storageInfo[storageSSH]} ${storageInfo[mkVdisk]} &> ${log[globalLog]}
     fi
 	#	logger "error" "${storageInfo[mkVdisks]} does not exist on ${storageInfo[stand_name]} path ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
 else
@@ -662,18 +673,18 @@ function storageCopyMK(){
     #if [[ ${storageInfo[hardware]} =~ ^[13456]00|[SV1]|[T5H]|[S01]$ ]]; then
     if [[ ${storageInfo[hardware]} =~ ${storageInfo[mkVdiskPattern]} ]]; then
         logger "info" "Checking if ${storageInfo[mkVdisk]} exist"
-        if [[ $(ssh ${storageInfo[stand_name]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} ]") -ne "0" ]]; then
+        if [[ $( ${storageInfo[storageSSH]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]} ]") -ne "0" ]]; then
 		    logger "warn" "${storageInfo[mkVdisks]} does not exist on ${storageInfo[stand_name]} path ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
             scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkVdisks]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
             logger "ver" "changing permission to ${storageInfo[mkVdisks]}"
-            ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
+            ${storageInfo[storageSSH]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkVdisks]}"
         fi
     elif [[ ${storageInfo[hardware]} =~ ${storageInfo[mkArrayPattern]} ]];then
-	    if [[ $(ssh ${storageInfo[stand_name]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]} ]") -ne "0" ]]; then
+	    if [[ $( ${storageInfo[storageSSH]} "[ -e ${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]} ]") -ne "0" ]]; then
             logger "warn" "copying files to ${storageInfo[stand_name]} ${storageInfo[mkArray]}"
             scp -P 26 ${storageInfo[localScriptPath]}/${storageInfo[mkArray]} ${storageInfo[stand_name]}:${storageInfo[remoteScriptsPath]}
             logger "ver" "changing permission to ${storageInfo[mkArray]}"
-            ssh ${storageInfo[stand_name]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]}"
+            ${storageInfo[storageSSH]} "chmod a+x ${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]}"
         fi
     else
         logger "info" "Error unknow system hardware"
@@ -734,7 +745,7 @@ done
 echo "
 include=${vdbench[disk_list]}
 
-wd=wd1,sd=*,xfersize=$bs,rdpct=0,rhpct=0,seekpct=0
+wd=wd1,sd=*,xfersize=$bs"k",rdpct=0,rhpct=0,seekpct=0
 rd=run1,wd=wd1,iorate=max,elapsed=24h,maxdata=${vdbench[write_data]},warmup=360,interval=${vdbench[interval]}
 " >> ${vdbench[write_test]}
     if [[ ${log[debug]} == 'true' ]]; then
@@ -768,7 +779,7 @@ done
 echo "
 include=${vdbench[disk_list]}
 
-wd=wd1,sd=*,xfersize=$bs,rdpct=100,rhpct=0,seekpct=0
+wd=wd1,sd=*,xfersize=$bs"k",rdpct=100,rhpct=0,seekpct=0
 rd=run1,wd=wd1,iorate=max,elapsed=24h,maxdata=${vdbench[read_data]},warmup=360,interval=${vdbench[interval]}
 " >> ${vdbench[read_test]}
 
@@ -786,7 +797,7 @@ rd=run1,wd=wd1,iorate=max,elapsed=24h,maxdata=${vdbench[read_data]},warmup=360,i
 
 function clear_storage_logs(){
     logger "ver" "Clearing Storage event logs"
-    ssh ${storageInfo[stand_name]} "svctask clearerrlog -force"
+    ${storageInfo[storageSSH]} "svctask clearerrlog -force"
 }
 
 function displayVdbenchResults() {
@@ -798,6 +809,38 @@ function displayVdbenchResults() {
 
 }
 
+function createStorageJsonFile() {
+
+echo "
+{
+    \"ResultsType\":          \"DEV\",
+        \"testType\":             \"IOZONE\",
+        \"stand\":                \"${storageInfo[stand_name]}\",
+        \"SVC_Version\":          \"${storageInfo[svcVersion]}\",
+        \"SVCBuilds\":            \"${storageInfo[svcBuild]}\",
+        \"backend\":              \"${storageInfo[backend]}\",
+        \"diskType\":             \"NONE\",
+        \"noOfDisks\":            \"8\",
+        \"totalDisks\":           \"1.2\",
+        \"Raid\":                 \"\",
+        \"testmode\":             \"CMP\",
+        \"vdiskCount\":           \"${storageInfo[volnum]}\",
+        \"vdiskSize\":            \"${storageInfo[volsize]}\",
+        \"coleto\":               \"\",
+        \"coleto_level\":         \"2\",
+        \"ClientMgmt\":           \"`hostname`\",
+        \"Clients\":              \"${clients[@]}\",
+        \"ClientsNum\":           \"${storageInfo[hostCount]}\",
+        \"ThreadsPerClient\":     \"${storageInfo[threads]}\",
+        \"LunPerClient\":         \"$(( ${storageInfo[volnum]} / ${storageInfo[hostCount]} ))\",
+        \"FCperClient\":          \"$(( ${hostInfo[totalOLFCount]} / ${storageInfo[hostCount]} ))\",
+        \"RaceMQVersion\":        \"${storageInfo[RaceMQVersion]}\",
+        \"MultiRace\":            \"$( ${storageInfo[storageSSH]} ps -efL | grep race | awk '$10 ~/racemqAd/ { racemqAd++ } $10 ~ /racemqBd/ { racemqBd++ } $10 ~ /rtc_racemqd/ { rtc_racemqd++ }END { if ( racemqAd < 2 || racemqBd < 2 && rtc_racemqd == 0 ) {print "1"} else { print "2" } }' )\",
+
+" > ${log[logPath]}/${storageInfo[jsonFile]}
+logger "info" "storageJsonFile|${log[logPath]}/${storageInfo[jsonFile]}"
+}
+ 
 #function _info(){ echo }
 #function _error(){ echo }
 #function _verbose(){ echo }
@@ -812,6 +855,7 @@ function displayVdbenchResults() {
 parse_parameter "$@"
 checking_params 
 if [[ ${log[debug]} == "true" ]]  ; then print_params ; fi
+storageInfo[storageSSH]="ssh -p 26 ${storageInfo[stand_name]} "
 getStorageInfo
 vdbenchMainDirectoryCreation
 if [[ ${vdbench[cshost]} == "true" ]] ; then 
@@ -819,6 +863,8 @@ if [[ ${vdbench[cshost]} == "true" ]] ; then
     createHosts
 fi
 
+createStorageJsonFile
+exit
 for bs in ${vdbench[blocksize]}; do
 	log[testCount]=1
 	for CP in ${vdbench[cmprun]} ; do
