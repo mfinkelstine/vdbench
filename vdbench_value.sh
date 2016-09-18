@@ -3,6 +3,7 @@ WRITE="write_test_"
 READ="read_test_"
 declare -A vdbench_params
 declare -A log
+declare -A testResultsData
 declare -A directoryStracture
 declare -A vdbenchResultsLog
 declare -A vdbench
@@ -30,8 +31,8 @@ storageInfo[mkVdisks]="mk_vdisks"
 storageInfo[mkArray]="mk_arrays_master"
 storageInfo[jsonFile]="storageInfo.json"
 #### global params #### 
-hostInfo[totalOLFCount]=0   # total online FC count
-hostInfo[totalOFFCount]=0   # total offline FC count
+hostInfo[totalOLFCount]="0"   # total online FC count
+hostInfo[totalOFFCount]="0"   # total offline FC count
 
 #### color sheame
 
@@ -405,17 +406,7 @@ directoryStracture[pathScripts]="/usr/global/scripts/"
 for c in ${vdbench_params[clients]}
 do
 	storageInfo[hostCount]=$(( storageInfo[hostCount] + 1 ))
-    if ssh $c "grep -qs "${directoryStracture[mountScripts]}" /proc/mounts " ; then
-    #if [[ $(ssh $c "grep -qs "${directoryStracture[mountScripts]}" /proc/mounts ") == "0" ]] ; then
-        logger "info" "[ ${directoryStracture[mountScripts]} ] is mounted"
-        logger "ver" "command | grep -qs \"${directoryStracture[mountScripts]}\""
-        wwpn=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep Up | awk '{print $1}' | tr "\n" ":"| sed -e 's|\:$||g'`
-        wwpnHostCount=`ssh $c /usr/global/scripts/qla_show_wwpn.sh | grep -c Up`
-    else
-        logger "ver" "command \"awk '{print \$2 }' /proc/mounts \| grep -qs \"\^${directoryStracture[mountScripts]}\$\"]"
-        logger "info" "[ ${directoryStracture[mountScripts]} ] is not mounted"
-        hostWWN $c
-    fi
+    hostWWN $c
     storageInfo[mkhost]="svctask mkhost -fcwwpn "
     storageInfo[mkhost]=${storageInfo[mkhost]}" ${hostInfo[[$c]['hostWWPN']]} "
     storageInfo[mkhost]=${storageInfo[mkhost]}" -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 "
@@ -424,8 +415,6 @@ do
 
     logger "ver" " [$c] host wwpn ${hostInfo[[$c]['hostWWPN']]}" 
     logger "debug" "  COMMAND \"${storageInfo[storageSSH]} ${storageInfo[mkhost]}\""
-    #logger "debug" "  COMMAND \"${storageInfo[storageSSH]} svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]} -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic 2>/dev/null\""
-    #${storageInfo[storageSSH]} svctask mkhost -fcwwpn ${hostInfo[[$c]['hostWWPN']]}  -force -iogrp io_grp0:io_grp1:io_grp2:io_grp3 -name $c -type generic &>/dev/null
     ${storageInfo[storageSSH]} ${storageInfo[mkhost]} 2>/dev/null
 done
 
@@ -449,7 +438,7 @@ function hostWWN(){
     hostInfo[[$host]['offlineWWNCount']]=0
     #printf "fc host %s\n" "$(echo  ${hostInfo[[$host]['fc_hosts']]} | tr -d '\n' ) "
     for fc_host in  $( echo ${hostInfo[[$host]['fc_hosts']]}|tr -d '\n' ); do
-        logger "debug" "ssh $host "cat ${hostInfo[fc_host_path]}/$fc_host/port_name ${hostInfo[fc_host_path]}/$fc_host/port_state ${hostInfo[scsi_host_path]}/$fc_host/link_state| tr '\n' ';'""
+        #logger "debug" "ssh $host "cat ${hostInfo[fc_host_path]}/$fc_host/port_name ${hostInfo[fc_host_path]}/$fc_host/port_state ${hostInfo[scsi_host_path]}/$fc_host/link_state| tr '\n' ';'\"\n"
         hostInfo[[$host][$fc_host]]=`ssh $host "cat ${hostInfo[fc_host_path]}/$fc_host/port_name ${hostInfo[fc_host_path]}/$fc_host/port_state ${hostInfo[scsi_host_path]}/$fc_host/link_state| tr '\n' ';'"`
      #echo "host $host fc_host ${hostInfo[[$host][$fc_host]]} fc_count = ${hostInfo[[$host]['fc_count']]}"
 
@@ -465,6 +454,7 @@ function hostWWN(){
             #printf "WWPN online %s\n" "${hostInfo[[$host]['hostWWPN']]}"
             logger "ver" "WWPN online ${hostInfo[[$host]['hostWWPN']]}"
         fi
+        logger "info" "total online fc count ${hostInfo[totalOLFCount]}"
      elif [[ $( echo ${hostInfo[[$host][$fc_host]]} | grep -i Down ) ]] ; then
         hostInfo[totalOFFCount]=$(( hostInfo[totalOFFCount]+1 ))
         hostInfo[[$host]['offlineWWNCount']]=$(( hostInfo[[$host]['offlineWWNCount']]+1 ))
@@ -580,14 +570,12 @@ function vdbenchResultsFiles() {
 
 	log[output_file]=${log[test_results]}/"out_$CP"
 	logger "ver" "test output file        : [ ${log[output_file]} ]"
-#	log[disk_file]=$CP"_disk_list"
 	
 	vdbench[write_test]=${log[test_files]}/$CP"_write"
 	logger "ver" "vdbench write test file : [ ${vdbench[write_test]} ]"
 
 	vdbench[read_test]=${log[test_files]}/$CP"_read"
 	logger "ver" "vdbench read test file  : [ ${vdbench[read_test]} ]"
-	#log[disk_list]=${log[test_files]}/$disk_file
 
 	vdbench[disk_list]=${log[test_files]}/$CP"_disk_list"
 	logger "ver" "vdbench disk list file  : [ ${vdbench[disk_list]} ]"
@@ -598,7 +586,6 @@ function vdbenchResultsFiles() {
 
 function createStorageVolumes(){
 
-#ssh $1 -p 26 ls /home/mk_arrays_master >/dev/null
 removeMdiskGroup
 
 storageInfo[mkMasterArray]="${storageInfo[remoteScriptsPath]}/${storageInfo[mkArray]} fc ${storageInfo[raidType]} sas_hdd "
@@ -801,7 +788,6 @@ function clear_storage_logs(){
 }
 
 function displayVdbenchResults() {
-    declare -A testResultsData
 
     testResultsData[write]=`cat ${log[output_file]} | grep -i avg | head -1 | tr -s ' ' ',' | sed -e 's/$/\n/'`
     testResultsData[read]=`cat ${log[output_file]} | grep -i avg | tail -1 | tr -s ' ' ',' | sed -e 's/$/\n/'`
@@ -840,6 +826,12 @@ echo "
 " > ${log[logPath]}/${storageInfo[jsonFile]}
 logger "info" "storageJsonFile|${log[logPath]}/${storageInfo[jsonFile]}"
 }
+function createJsonResults(){
+    local compRatio=$1
+
+    
+    
+}
  
 #function _info(){ echo }
 #function _error(){ echo }
@@ -864,7 +856,6 @@ if [[ ${vdbench[cshost]} == "true" ]] ; then
 fi
 
 createStorageJsonFile
-exit
 for bs in ${vdbench[blocksize]}; do
 	log[testCount]=1
 	for CP in ${vdbench[cmprun]} ; do
@@ -875,10 +866,10 @@ for bs in ${vdbench[blocksize]}; do
         getStorageVolumes
 	    vdbenchDirectoryResutls
 	    if [[ ${vdbench[hrdev]} == "true" ]] ; then hostRescan ; fi
-		vdbenchResultsFiles
-		vdbenchDeviceList
-		vdbenchWriteTest
-		vdbenchReadTest
+		#vdbenchResultsFiles
+		#vdbenchDeviceList
+		#vdbenchWriteTest
+		#vdbenchReadTest
         displayVdbenchResults
 		log[testCount]=$(( log[testCount] + 1 ))
 	done
@@ -892,3 +883,8 @@ done
 # [21/10/16 19:10:22] [ERROR] 
 # [21/10/16 19:10:22] [VERBOSE]  
 # [21/10/16 19:10:22] [DEBUG] 
+#### resultsstracture
+# vdbenchResutls[[CMP_RATIO][start]]
+# vdbenchResutls[[CMP_RATIO][end]]
+# vdbenchResutls[[CMP_RATIO][write]]
+# vdbenchResutls[[CMP_RATIO][read]]
